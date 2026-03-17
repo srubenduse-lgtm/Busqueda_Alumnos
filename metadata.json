@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Sistema de Salida Escolar SUPABASE",
+  "description": "Sistema de reconocimiento y anuncio de salida de estudiantes con base de datos de acudientes y alumnos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

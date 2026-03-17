@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "A student in the school.",
+      "type": "object",
+      "properties": {
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "grade": { "type": "string" },
+        "guardianIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["firstName", "lastName", "grade"]
+    },
+    "Guardian": {
+      "title": "Guardian",
+      "description": "A parent or guardian of a student.",
+      "type": "object",
+      "properties": {
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "vehicleModel": { "type": "string" },
+        "licensePlate": { "type": "string" },
+        "studentIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["firstName", "lastName", "licensePlate"]
+    },
+    "Pickup": {
+      "title": "Pickup Event",
+      "description": "An event triggered when a guardian arrives to pick up a student.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "guardianId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "announced", "completed"]
+        }
+      },
+      "required": ["studentId", "guardianId", "timestamp", "status"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Collection of students."
+    },
+    "/guardians/{guardianId}": {
+      "schema": { "$ref": "#/entities/Guardian" },
+      "description": "Collection of guardians."
+    },
+    "/pickups/{pickupId}": {
+      "schema": { "$ref": "#/entities/Pickup" },
+      "description": "Collection of pickup events."
+    }
+  }
+}
