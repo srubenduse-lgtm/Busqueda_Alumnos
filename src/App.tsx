@@ -7,9 +7,8 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { supabase } from './supabase';
 import { User } from '@supabase/supabase-js';
-import { Monitor, Users, Camera, LogOut, LogIn } from 'lucide-react';
+import { Monitor, Users, LogOut, LogIn } from 'lucide-react';
 import Admin from './pages/Admin';
-import CameraSimulator from './pages/CameraSimulator';
 import DisplayScreen from './pages/DisplayScreen';
 
 export default function App() {
@@ -121,10 +120,6 @@ export default function App() {
                     <Users className="w-4 h-4 mr-2" />
                     Administración
                   </Link>
-                  <Link to="/camera" className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                    <Camera className="w-4 h-4 mr-2" />
-                    Simulador Cámara
-                  </Link>
                   <Link to="/display" className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                     <Monitor className="w-4 h-4 mr-2" />
                     Pantalla Salida
@@ -149,7 +144,6 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/admin" replace />} />
             <Route path="/admin" element={<Admin />} />
-            <Route path="/camera" element={<CameraSimulator />} />
             <Route path="/display" element={<DisplayScreen />} />
           </Routes>
         </main>
