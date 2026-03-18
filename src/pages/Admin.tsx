@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
-import { Student, Guardian } from '../types';
+import { Student, Guardian, CameraLog } from '../types';
 import Papa from 'papaparse';
-import { Upload, Plus, Trash2, Link as LinkIcon, Camera, X } from 'lucide-react';
+import { Upload, Plus, Trash2, Link as LinkIcon, Camera, X, Activity, CheckCircle, XCircle } from 'lucide-react';
 import AIAssistant from '../components/AIAssistant';
 
 export default function Admin() {
   const [students, setStudents] = useState<Student[]>([]);
   const [guardians, setGuardians] = useState<Guardian[]>([]);
-  const [activeTab, setActiveTab] = useState<'students' | 'guardians'>('students');
+  const [cameraLogs, setCameraLogs] = useState<CameraLog[]>([]);
+  const [activeTab, setActiveTab] = useState<'students' | 'guardians' | 'logs'>('students');
 
   const [newStudent, setNewStudent] = useState({ firstName: '', lastName: '', grade: '' });
   const [newGuardian, setNewGuardian] = useState({ firstName: '', lastName: '', licensePlate: '', vehicleModel: '', photoUrl: '' });
@@ -27,9 +28,14 @@ export default function Admin() {
       const { data } = await supabase.from('guardians').select('*');
       if (data) setGuardians(data as Guardian[]);
     };
+    const fetchLogs = async () => {
+      const { data } = await supabase.from('camera_logs').select('*').order('created_at', { ascending: false }).limit(50);
+      if (data) setCameraLogs(data as CameraLog[]);
+    };
 
     fetchStudents();
     fetchGuardians();
+    fetchLogs();
 
     const studentsChannel = supabase.channel('public:students')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, payload => {
@@ -47,9 +53,16 @@ export default function Admin() {
       })
       .subscribe();
 
+    const logsChannel = supabase.channel('public:camera_logs')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'camera_logs' }, payload => {
+        setCameraLogs(prev => [payload.new as CameraLog, ...prev].slice(0, 50));
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(studentsChannel);
       supabase.removeChannel(guardiansChannel);
+      supabase.removeChannel(logsChannel);
     };
   }, []);
 
@@ -277,6 +290,17 @@ export default function Admin() {
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
           >
             Acudientes ({guardians.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`${
+              activeTab === 'logs'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2`}
+          >
+            <Activity className="w-4 h-4" />
+            Historial de Cámara
           </button>
         </nav>
       </div>
@@ -523,6 +547,78 @@ export default function Admin() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'logs' && (
+        <div className="space-y-4">
+          <div className="bg-white shadow-sm rounded-lg overflow-hidden border border-gray-100">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-blue-600" />
+                Registro en Tiempo Real
+              </h2>
+              <span className="text-xs text-gray-500">Mostrando últimos 50 eventos</span>
+            </div>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-white">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha / Hora</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lectura</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acudiente</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {cameraLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      Esperando eventos de la cámara...
+                    </td>
+                  </tr>
+                ) : (
+                  cameraLogs.map((log) => {
+                    const guardian = log.guardian_id ? guardians.find(g => g.id === log.guardian_id) : null;
+                    return (
+                      <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-md ${
+                            log.event_type === 'plate' ? 'bg-blue-100 text-blue-800' : 
+                            log.event_type === 'face' ? 'bg-purple-100 text-purple-800' : 
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {log.event_type === 'plate' ? 'Placa' : log.event_type === 'face' ? 'Rostro' : 'Desconocido'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {log.content}
+                          {log.details && <span className="block text-xs text-gray-500 font-normal mt-1">{log.details}</span>}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {log.matched ? (
+                            <span className="flex items-center gap-1 text-green-600 text-sm font-medium">
+                              <CheckCircle className="w-4 h-4" /> Reconocido
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-red-500 text-sm font-medium">
+                              <XCircle className="w-4 h-4" /> No Reconocido
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {guardian ? `${guardian.firstName} ${guardian.lastName}` : '-'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

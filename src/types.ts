@@ -23,3 +23,13 @@ export interface Pickup {
   timestamp: string;
   status: 'pending' | 'announced' | 'completed';
 }
+
+export interface CameraLog {
+  id: string;
+  created_at: string;
+  event_type: 'plate' | 'face' | 'unknown';
+  content: string;
+  matched: boolean;
+  guardian_id?: string;
+  details?: string;
+}

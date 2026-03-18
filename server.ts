@@ -122,7 +122,10 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
 
       if (!error && guardians && guardians.length > 0) {
         await processPickup(guardians[0]);
+        await saveCameraLog('plate', licensePlate, true, guardians[0].id);
         return res.status(200).send('OK');
+      } else {
+        await saveCameraLog('plate', licensePlate, false);
       }
     }
 
@@ -160,15 +163,18 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
         if (bestMatch && highestSimilarity >= 90) {
           console.log(`[IA] Rostro reconocido: ${bestMatch.firstName} ${bestMatch.lastName} (${highestSimilarity.toFixed(2)}% similitud)`);
           await processPickup(bestMatch);
+          await saveCameraLog('face', 'Rostro detectado', true, bestMatch.id, `Similitud: ${highestSimilarity.toFixed(2)}%`);
           return res.status(200).send('OK');
         } else {
           console.log(`[IA] Rostro no reconocido. Mayor similitud: ${highestSimilarity.toFixed(2)}%`);
+          await saveCameraLog('face', 'Rostro detectado', false, undefined, `Mayor similitud: ${highestSimilarity.toFixed(2)}%`);
         }
       }
     }
 
     if (!licensePlate && !imageBuffer) {
       console.log('[HIKVISION] No se detectó placa ni imagen en el payload.');
+      await saveCameraLog('unknown', 'Payload irreconocible', false);
     }
 
     res.status(200).send('OK');
@@ -177,6 +183,21 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
     res.status(500).send('Internal Server Error');
   }
 });
+
+// Función auxiliar para guardar logs de la cámara
+async function saveCameraLog(eventType: string, content: string, matched: boolean, guardianId?: string, details?: string) {
+  try {
+    await supabase.from('camera_logs').insert([{
+      event_type: eventType,
+      content,
+      matched,
+      guardian_id: guardianId || null,
+      details: details || null
+    }]);
+  } catch (e) {
+    console.error('Error guardando log de cámara:', e);
+  }
+}
 
 // Función auxiliar para crear los pickups
 async function processPickup(guardian: any) {
