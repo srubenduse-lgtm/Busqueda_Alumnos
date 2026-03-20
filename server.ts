@@ -7,7 +7,7 @@ import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -165,10 +165,6 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
           await processPickup(bestMatch);
           await saveCameraLog('face', 'Rostro detectado', true, bestMatch.id, `Similitud: ${highestSimilarity.toFixed(2)}%`);
           
-          // Extraer la IP de la cámara que envió la petición
-          const cameraIp = req.ip || req.connection.remoteAddress || '192.168.1.100';
-          await triggerCameraBeep(cameraIp);
-          
           return res.status(200).send('OK');
         } else {
           console.log(`[IA] Rostro no reconocido. Mayor similitud: ${highestSimilarity.toFixed(2)}%`);
@@ -215,40 +211,6 @@ async function processPickup(guardian: any) {
     }]);
   }
   console.log('Pickups creados exitosamente en Supabase.');
-}
-
-// Función para enviar señal a la cámara Hikvision (Pitido / Alarma)
-async function triggerCameraBeep(cameraIp: string) {
-  console.log(`[HIKVISION] Enviando señal de pitido a la cámara en ${cameraIp}...`);
-  
-  // CONFIGURACIÓN DE LA CÁMARA
-  const CAMERA_USER = process.env.CAMERA_USER || 'admin';
-  const CAMERA_PASS = process.env.CAMERA_PASS || 'password123';
-  
-  try {
-    // Las cámaras Hikvision usan el protocolo ISAPI.
-    // Dependiendo del modelo, el endpoint puede variar.
-    // Ejemplo 1: Activar salida de alarma (Relay) que puede estar conectada a un timbre/puerta
-    const endpointIO = `http://${cameraIp}/ISAPI/System/IO/outputs/1/trigger`;
-    
-    // Ejemplo 2: Activar alarma sonora y luminosa (Cámaras AcuSense / ColorVu)
-    const endpointBuzzer = `http://${cameraIp}/ISAPI/Smart/AudioAndLightAlarm/channels/1/alarms`;
-
-    // Nota: Hikvision requiere Autenticación "Digest". 
-    // En producción, se usaría una librería como 'axios-digest' para manejar este handshake.
-    
-    /* 
-    Ejemplo conceptual de la petición:
-    await axiosDigest.put(endpointBuzzer, 
-      "<AudioAndLightAlarm><soundEnable>true</soundEnable></AudioAndLightAlarm>", 
-      { auth: { username: CAMERA_USER, password: CAMERA_PASS } }
-    );
-    */
-    
-    console.log('[HIKVISION] Señal de pitido enviada teóricamente.');
-  } catch (error) {
-    console.error('[HIKVISION] Error al intentar hacer pitar la cámara:', error);
-  }
 }
 
 async function startServer() {

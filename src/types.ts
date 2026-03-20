@@ -1,9 +1,23 @@
+export interface School {
+  id: string;
+  name: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: 'superUser' | 'admin';
+  school_id?: string;
+}
+
 export interface Student {
   id: string;
   firstName: string;
   lastName: string;
   grade: string;
+  photoUrl?: string;
   guardianIds: string[];
+  school_id?: string;
 }
 
 export interface Guardian {
@@ -11,9 +25,11 @@ export interface Guardian {
   firstName: string;
   lastName: string;
   photoUrl: string;
+  licensePlatePhotoUrl?: string;
   vehicleModel: string;
   licensePlate: string;
   studentIds: string[];
+  school_id?: string;
 }
 
 export interface Pickup {
@@ -22,6 +38,7 @@ export interface Pickup {
   guardianId: string;
   timestamp: string;
   status: 'pending' | 'announced' | 'completed';
+  school_id?: string;
 }
 
 export interface CameraLog {
@@ -32,4 +49,5 @@ export interface CameraLog {
   matched: boolean;
   guardian_id?: string;
   details?: string;
+  school_id?: string;
 }

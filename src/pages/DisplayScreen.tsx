@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
 import { Pickup, Student, Guardian } from '../types';
-import { Volume2, VolumeX, Car, User, Clock } from 'lucide-react';
+import { Volume2, VolumeX, Car, User, Clock, Monitor } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SchoolProvider, useSchool } from '../SchoolContext';
 
 type AnnouncementTask = {
   pickup: Pickup;
@@ -10,22 +11,68 @@ type AnnouncementTask = {
   nextPlayTime: number;
 };
 
+const getSedeForGrade = (grade: string): 1 | 2 => {
+  if (!grade) return 1;
+  const g = grade.toLowerCase();
+  
+  if (g.includes('kinder') || g.includes('pre') || g.includes('trans') || g.includes('k') || g.includes('párvulo') || g.includes('parvulo') || g.includes('maternal')) {
+    return 2;
+  }
+  
+  const match = g.match(/\d+/);
+  if (match) {
+    const num = parseInt(match[0], 10);
+    if (num <= 3) return 2;
+    return 1;
+  }
+  
+  if (g.includes('primer') || g.includes('segund') || g.includes('tercer') || g.includes('uno') || g.includes('dos') || g.includes('tres')) {
+    return 2;
+  }
+  
+  return 1;
+};
+
 export default function DisplayScreen() {
+  const { currentSchool } = useSchool();
   const [pickups, setPickups] = useState<Pickup[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [guardians, setGuardians] = useState<Guardian[]>([]);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [currentAnnouncement, setCurrentAnnouncement] = useState<Pickup | null>(null);
+  const [selectedSede, setSelectedSede] = useState<1 | 2 | 'ALL'>('ALL');
   
   const activeTasks = useRef<AnnouncementTask[]>([]);
   const isSpeaking = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const studentsRef = useRef<Student[]>([]);
   const audioEnabledRef = useRef(audioEnabled);
+  const pickupsRef = useRef<Pickup[]>([]);
 
   useEffect(() => {
     studentsRef.current = students;
   }, [students]);
+
+  useEffect(() => {
+    pickupsRef.current = pickups;
+  }, [pickups]);
+
+  // Auto-completar y remover de pantalla después de 5 minutos
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      const FIVE_MINUTES = 5 * 60 * 1000;
+      
+      pickupsRef.current.forEach(pickup => {
+        const pickupTime = new Date(pickup.timestamp).getTime();
+        if (now - pickupTime > FIVE_MINUTES) {
+          supabase.from('pickups').update({ status: 'completed' }).eq('id', pickup.id).then();
+        }
+      });
+    }, 15000); // Revisar cada 15 segundos
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
   useEffect(() => {
     audioEnabledRef.current = audioEnabled;
@@ -35,59 +82,47 @@ export default function DisplayScreen() {
   }, [audioEnabled]);
 
   useEffect(() => {
-    const fetchStudents = async () => {
-      const { data } = await supabase.from('students').select('*');
-      if (data) setStudents(data as Student[]);
-    };
-    const fetchGuardians = async () => {
-      const { data } = await supabase.from('guardians').select('*');
-      if (data) setGuardians(data as Guardian[]);
-    };
-    const fetchPickups = async () => {
-      const { data } = await supabase.from('pickups').select('*').in('status', ['pending', 'announced']);
-      if (data) {
-        const newPickups = data as Pickup[];
-        setPickups(newPickups.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-        
-        const pending = newPickups.filter(p => p.status === 'pending');
-        if (pending.length > 0) {
-          pending.forEach(p => {
-            if (!activeTasks.current.find(t => t.pickup.id === p.id)) {
-              activeTasks.current.push({
-                pickup: p,
-                playsRemaining: 3,
-                nextPlayTime: 0
-              });
-              supabase.from('pickups').update({ status: 'announced' }).eq('id', p.id).then();
-            }
-          });
-          processTasks();
-        }
+    if (!currentSchool) return;
+
+    const loadInitialData = async () => {
+      const [studentsRes, guardiansRes, pickupsRes] = await Promise.all([
+        supabase.from('students').select('*').eq('school_id', currentSchool.id),
+        supabase.from('guardians').select('*').eq('school_id', currentSchool.id),
+        supabase.from('pickups').select('*').eq('school_id', currentSchool.id).in('status', ['pending', 'announced'])
+      ]);
+
+      if (studentsRes.data) {
+        setStudents(studentsRes.data as Student[]);
+        studentsRef.current = studentsRes.data as Student[];
+      }
+      if (guardiansRes.data) {
+        setGuardians(guardiansRes.data as Guardian[]);
+      }
+      if (pickupsRes.data) {
+        processFetchedPickups(pickupsRes.data as Pickup[]);
       }
     };
 
-    fetchStudents();
-    fetchGuardians();
-    fetchPickups();
+    loadInitialData();
 
-    const studentsChannel = supabase.channel('public:students_disp')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, payload => {
+    const studentsChannel = supabase.channel(`public:students_disp:${currentSchool.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students', filter: `school_id=eq.${currentSchool.id}` }, payload => {
         if (payload.eventType === 'INSERT') setStudents(prev => [...prev, payload.new as Student]);
         if (payload.eventType === 'UPDATE') setStudents(prev => prev.map(s => s.id === payload.new.id ? payload.new as Student : s));
         if (payload.eventType === 'DELETE') setStudents(prev => prev.filter(s => s.id !== payload.old.id));
       })
       .subscribe();
 
-    const guardiansChannel = supabase.channel('public:guardians_disp')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'guardians' }, payload => {
+    const guardiansChannel = supabase.channel(`public:guardians_disp:${currentSchool.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'guardians', filter: `school_id=eq.${currentSchool.id}` }, payload => {
         if (payload.eventType === 'INSERT') setGuardians(prev => [...prev, payload.new as Guardian]);
         if (payload.eventType === 'UPDATE') setGuardians(prev => prev.map(g => g.id === payload.new.id ? payload.new as Guardian : g));
         if (payload.eventType === 'DELETE') setGuardians(prev => prev.filter(g => g.id !== payload.old.id));
       })
       .subscribe();
 
-    const pickupsChannel = supabase.channel('public:pickups_disp')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pickups' }, payload => {
+    const pickupsChannel = supabase.channel(`public:pickups_disp:${currentSchool.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pickups', filter: `school_id=eq.${currentSchool.id}` }, payload => {
         fetchPickups();
       })
       .subscribe();
@@ -98,7 +133,57 @@ export default function DisplayScreen() {
       supabase.removeChannel(pickupsChannel);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, []);
+  }, [currentSchool]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    // Re-process pickups when sede changes
+    fetchPickups();
+    // Clear current announcement if it doesn't belong to the new sede
+    if (currentAnnouncement && selectedSede !== 'ALL') {
+      const student = studentsRef.current.find(s => s.id === currentAnnouncement.studentId);
+      if (student && getSedeForGrade(student.grade) !== selectedSede) {
+        setCurrentAnnouncement(null);
+        isSpeaking.current = false;
+        activeTasks.current = [];
+      }
+    }
+  }, [selectedSede]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchPickups = async () => {
+    if (!currentSchool) return;
+    const { data } = await supabase.from('pickups').select('*').eq('school_id', currentSchool.id).in('status', ['pending', 'announced']);
+    if (data) {
+      processFetchedPickups(data as Pickup[]);
+    }
+  };
+
+  const processFetchedPickups = (allPickups: Pickup[]) => {
+    let filtered = allPickups;
+    if (selectedSede !== 'ALL') {
+      filtered = allPickups.filter(p => {
+        const student = studentsRef.current.find(s => s.id === p.studentId);
+        if (!student) return false;
+        return getSedeForGrade(student.grade) === selectedSede;
+      });
+    }
+    
+    setPickups(filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    
+    const pending = filtered.filter(p => p.status === 'pending');
+    if (pending.length > 0) {
+      pending.forEach(p => {
+        if (!activeTasks.current.find(t => t.pickup.id === p.id)) {
+          activeTasks.current.push({
+            pickup: p,
+            playsRemaining: 3,
+            nextPlayTime: 0
+          });
+          supabase.from('pickups').update({ status: 'announced' }).eq('id', p.id).then();
+        }
+      });
+      processTasks();
+    }
+  };
 
   const processTasks = () => {
     if (!audioEnabledRef.current || isSpeaking.current) return;
@@ -169,10 +254,38 @@ export default function DisplayScreen() {
 
     return (
       <div className="space-y-6">
-        <h3 className="text-7xl font-black text-white leading-tight">
-          {student.firstName} <br/>
-          <span className="text-blue-200">{student.lastName}</span>
-        </h3>
+        <div className="flex items-start justify-between gap-8">
+          <div className="flex items-center gap-6">
+            {student.photoUrl && (
+              <div className="flex-shrink-0 flex flex-col items-center gap-2">
+                <img 
+                  src={student.photoUrl} 
+                  alt={`${student.firstName} ${student.lastName}`} 
+                  className="w-32 h-32 rounded-2xl object-cover border-4 border-blue-400 shadow-2xl"
+                />
+                <span className="text-blue-200 font-medium text-sm bg-black/20 px-3 py-1 rounded-full">
+                  Estudiante
+                </span>
+              </div>
+            )}
+            <h3 className="text-7xl font-black text-white leading-tight">
+              {student.firstName} <br/>
+              <span className="text-blue-200">{student.lastName}</span>
+            </h3>
+          </div>
+          {guardian.photoUrl && (
+            <div className="flex-shrink-0 flex flex-col items-center gap-2">
+              <img 
+                src={guardian.photoUrl} 
+                alt={`${guardian.firstName} ${guardian.lastName}`} 
+                className="w-32 h-32 rounded-2xl object-cover border-4 border-white/20 shadow-2xl"
+              />
+              <span className="text-blue-200 font-medium text-sm bg-black/20 px-3 py-1 rounded-full">
+                Acudiente
+              </span>
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap gap-4 mt-8">
           <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl flex items-center gap-3 border border-white/10">
             <span className="text-blue-200 font-medium uppercase tracking-wider text-sm">Grado</span>
@@ -189,8 +302,22 @@ export default function DisplayScreen() {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-gray-900 -m-6 p-6 sm:-m-8 sm:p-8 flex flex-col">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-4xl font-black text-white tracking-tight">SALIDA ESCOLAR</h1>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-4xl font-black text-white tracking-tight">SALIDA ESCOLAR</h1>
+          <div className="flex items-center gap-2 mt-2">
+            <Monitor className="w-5 h-5 text-gray-400" />
+            <select
+              value={selectedSede}
+              onChange={(e) => setSelectedSede(e.target.value as any)}
+              className="bg-gray-800 text-gray-200 border border-gray-700 rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="ALL">Todas las Sedes (General)</option>
+              <option value="1">Sede 1 (4to a 12mo)</option>
+              <option value="2">Sede 2 (Kinder a 3ro)</option>
+            </select>
+          </div>
+        </div>
         <button
           onClick={() => setAudioEnabled(!audioEnabled)}
           className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-lg transition-all ${
@@ -282,27 +409,53 @@ export default function DisplayScreen() {
                         : 'bg-gray-700/50 border-gray-600 hover:bg-gray-700'
                     }`}
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <h4 className={`text-xl font-bold ${isCurrent ? 'text-blue-300' : 'text-white'}`}>
-                        {student.firstName} {student.lastName}
-                      </h4>
-                      <span className="text-xs font-bold bg-gray-600 text-gray-300 px-2 py-1 rounded-md">
-                        {student.grade}
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-4">
-                      <div className="flex items-center gap-2 text-gray-400 text-sm">
-                        <Car className="w-4 h-4" />
-                        <span className="font-mono">{guardian.licensePlate}</span>
+                    <div className="flex gap-4">
+                      <div className="flex -space-x-4">
+                        {student.photoUrl && (
+                          <img 
+                            src={student.photoUrl} 
+                            alt="Estudiante" 
+                            className="w-12 h-12 rounded-full object-cover border-2 border-gray-600 flex-shrink-0 relative z-10"
+                          />
+                        )}
+                        {guardian.photoUrl && (
+                          <img 
+                            src={guardian.photoUrl} 
+                            alt="Acudiente" 
+                            className="w-12 h-12 rounded-full object-cover border-2 border-gray-600 flex-shrink-0 relative z-0"
+                          />
+                        )}
                       </div>
-                      
-                      <button
-                        onClick={() => completePickup(pickup.id)}
-                        className="text-xs font-bold bg-green-500/20 text-green-400 hover:bg-green-500/30 px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        Completar
-                      </button>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className={`text-xl font-bold ${isCurrent ? 'text-blue-300' : 'text-white'}`}>
+                            {student.firstName} {student.lastName}
+                          </h4>
+                          <span className="text-xs font-bold bg-gray-600 text-gray-300 px-2 py-1 rounded-md">
+                            {student.grade}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center gap-4 text-gray-400 text-sm">
+                            <div className="flex items-center gap-1.5">
+                              <Car className="w-4 h-4" />
+                              <span className="font-mono">{guardian.licensePlate}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-4 h-4" />
+                              <span>{new Date(pickup.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => completePickup(pickup.id)}
+                            className="text-xs font-bold bg-green-500/20 text-green-400 hover:bg-green-500/30 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            Completar
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </motion.div>
                 );
