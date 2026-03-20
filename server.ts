@@ -49,6 +49,9 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
   try {
     console.log('--- EVENTO DE CÁMARA RECIBIDO ---');
     
+    // Extraer el school_id de los parámetros de la URL (ej: ?school_id=1234-5678)
+    const school_id = req.query.school_id as string;
+    
     let xmlData = '';
     let imageBuffer: Buffer | null = null;
 
@@ -115,17 +118,20 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
     // ==========================================
     if (licensePlate) {
       console.log(`[HIKVISION] Placa detectada: ${licensePlate}`);
-      const { data: guardians, error } = await supabase
-        .from('guardians')
-        .select('*')
-        .ilike('licensePlate', licensePlate);
+      
+      let query = supabase.from('guardians').select('*').ilike('licensePlate', licensePlate);
+      if (school_id) {
+        query = query.eq('school_id', school_id);
+      }
+      
+      const { data: guardians, error } = await query;
 
       if (!error && guardians && guardians.length > 0) {
-        await processPickup(guardians[0]);
-        await saveCameraLog('plate', licensePlate, true, guardians[0].id);
+        await processPickup(guardians[0], school_id);
+        await saveCameraLog('plate', licensePlate, true, guardians[0].id, undefined, school_id || guardians[0].school_id);
         return res.status(200).send('OK');
       } else {
-        await saveCameraLog('plate', licensePlate, false);
+        await saveCameraLog('plate', licensePlate, false, undefined, undefined, school_id);
       }
     }
 
@@ -136,11 +142,12 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
       console.log('[HIKVISION] Procesando imagen con IA Facial...');
       
       // Obtener todos los acudientes que tengan foto registrada
-      const { data: guardians, error } = await supabase
-        .from('guardians')
-        .select('*')
-        .not('photoUrl', 'is', null)
-        .neq('photoUrl', '');
+      let query = supabase.from('guardians').select('*').not('photoUrl', 'is', null).neq('photoUrl', '');
+      if (school_id) {
+        query = query.eq('school_id', school_id);
+      }
+      
+      const { data: guardians, error } = await query;
 
       if (!error && guardians && guardians.length > 0) {
         let bestMatch = null;
@@ -162,20 +169,20 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
         // Si la similitud es mayor al 90%, aprobamos la salida
         if (bestMatch && highestSimilarity >= 90) {
           console.log(`[IA] Rostro reconocido: ${bestMatch.firstName} ${bestMatch.lastName} (${highestSimilarity.toFixed(2)}% similitud)`);
-          await processPickup(bestMatch);
-          await saveCameraLog('face', 'Rostro detectado', true, bestMatch.id, `Similitud: ${highestSimilarity.toFixed(2)}%`);
+          await processPickup(bestMatch, school_id);
+          await saveCameraLog('face', 'Rostro detectado', true, bestMatch.id, `Similitud: ${highestSimilarity.toFixed(2)}%`, school_id || bestMatch.school_id);
           
           return res.status(200).send('OK');
         } else {
           console.log(`[IA] Rostro no reconocido. Mayor similitud: ${highestSimilarity.toFixed(2)}%`);
-          await saveCameraLog('face', 'Rostro detectado', false, undefined, `Mayor similitud: ${highestSimilarity.toFixed(2)}%`);
+          await saveCameraLog('face', 'Rostro detectado', false, undefined, `Mayor similitud: ${highestSimilarity.toFixed(2)}%`, school_id);
         }
       }
     }
 
     if (!licensePlate && !imageBuffer) {
       console.log('[HIKVISION] No se detectó placa ni imagen en el payload.');
-      await saveCameraLog('unknown', 'Payload irreconocible', false);
+      await saveCameraLog('unknown', 'Payload irreconocible', false, undefined, undefined, school_id);
     }
 
     res.status(200).send('OK');
@@ -186,14 +193,15 @@ app.post('/api/webhooks/hikvision', upload.any(), async (req, res) => {
 });
 
 // Función auxiliar para guardar logs de la cámara
-async function saveCameraLog(eventType: string, content: string, matched: boolean, guardianId?: string, details?: string) {
+async function saveCameraLog(eventType: string, content: string, matched: boolean, guardianId?: string, details?: string, school_id?: string) {
   try {
     await supabase.from('camera_logs').insert([{
       event_type: eventType,
       content,
       matched,
       guardian_id: guardianId || null,
-      details: details || null
+      details: details || null,
+      school_id: school_id || null
     }]);
   } catch (e) {
     console.error('Error guardando log de cámara:', e);
@@ -201,13 +209,14 @@ async function saveCameraLog(eventType: string, content: string, matched: boolea
 }
 
 // Función auxiliar para crear los pickups
-async function processPickup(guardian: any) {
+async function processPickup(guardian: any, school_id?: string) {
   console.log(`Acudiente autorizado: ${guardian.firstName} ${guardian.lastName}`);
   for (const studentId of guardian.studentIds) {
     await supabase.from('pickups').insert([{
       studentId,
       guardianId: guardian.id,
-      status: 'pending'
+      status: 'pending',
+      school_id: school_id || guardian.school_id || null
     }]);
   }
   console.log('Pickups creados exitosamente en Supabase.');
