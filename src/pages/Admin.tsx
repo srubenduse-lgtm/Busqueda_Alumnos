@@ -1190,6 +1190,23 @@ export default function Admin() {
 
       {activeTab === 'logs' && (
         <div className="space-y-4">
+          <div className="bg-white shadow-sm rounded-lg overflow-hidden border border-gray-100 p-6 mb-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
+              <Camera className="w-5 h-5 text-indigo-600" />
+              Configuración de Cámara Hikvision
+            </h2>
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-800 space-y-2">
+              <p>Para conectar tu cámara Hikvision a este colegio, configura el <strong>HTTP Listening (Webhook)</strong> con la siguiente URL:</p>
+              <div className="bg-white p-2 rounded border border-blue-200 font-mono text-xs break-all select-all">
+                {window.location.origin}/api/webhooks/hikvision?school_id={currentSchool?.id}
+              </div>
+              <p className="mt-2">Si usas el <strong>Agente Local</strong> para activar la alarma o abrir la puerta, asegúrate de configurar el archivo <code className="bg-white px-1 rounded">.env</code> con:</p>
+              <div className="bg-white p-2 rounded border border-blue-200 font-mono text-xs select-all">
+                SCHOOL_ID={currentSchool?.id}
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white shadow-sm rounded-lg overflow-hidden border border-gray-100">
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
               <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
