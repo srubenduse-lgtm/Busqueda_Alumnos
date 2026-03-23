@@ -1,0 +1,14 @@
+{
+  "name": "hikvision-local-agent",
+  "version": "1.0.0",
+  "description": "Agente local para escuchar eventos de Supabase y enviar comandos ISAPI a cámara Hikvision",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.4.0"
+  }
+}
